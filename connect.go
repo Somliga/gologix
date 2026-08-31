@@ -159,7 +159,7 @@ func (client *Client) Connect() error {
 		if err != nil {
 			return err
 		}
-		err = client.forwardOpen(item)
+		err = client.forwardOpen(item, size)
 		if err != nil {
 			client.Logger.Warn("Large forward open failed. Falling back to standard forward open", slog.Any("err", err))
 			size = connSizeStandardDefault
@@ -170,7 +170,7 @@ func (client *Client) Connect() error {
 		if err != nil {
 			return err
 		}
-		if err := client.forwardOpen(item); err != nil {
+		if err := client.forwardOpen(item, size); err != nil {
 			client.Logger.Error("unable to open connection", slog.Any("err", err))
 			return err
 		}
@@ -193,6 +193,16 @@ func (client *Client) Connected() bool {
 // NegotiatedSize is the connection size the last successful handshake agreed. Zero before
 // the first successful Connect.
 func (client *Client) NegotiatedSize() uint16 { return client.negotiatedSize }
+
+// activeSize is the size a message must be packed against: what the last handshake actually
+// agreed, or the configured value before the first successful connect. Packing against the
+// configured value after a fallback builds messages the negotiated connection cannot carry.
+func (client *Client) activeSize() uint16 {
+	if client.negotiatedSize != 0 {
+		return client.negotiatedSize
+	}
+	return client.ConnectionSize
+}
 
 func (client *Client) registerSession() error {
 	reg_msg := msgCIPRegister{
@@ -501,7 +511,10 @@ func (client *Client) newForwardOpenStandard(size uint16) (CIPItem, error) {
 	return item, nil
 }
 
-func (client *Client) forwardOpen(forwardOpenMsg CIPItem) error {
+// forwardOpen sends forwardOpenMsg and waits for the reply. size is the connection size THIS
+// attempt negotiated with, logged on success — it must not be read from client.ConnectionSize,
+// which may no longer match what was actually negotiated after a fallback.
+func (client *Client) forwardOpen(forwardOpenMsg CIPItem, size uint16) error {
 	reqItems := make([]CIPItem, 2)
 	reqItems[0] = CIPItem{Header: cipItemHeader{ID: cipItem_Null}}
 	reqItems[1] = forwardOpenMsg
@@ -534,7 +547,7 @@ func (client *Client) forwardOpen(forwardOpenMsg CIPItem) error {
 
 	client.Logger.Info(
 		"successfully opened connection",
-		slog.Any("ConnectionSize", uint32(client.ConnectionSize)),
+		slog.Any("ConnectionSize", uint32(size)),
 		slog.Any("OTNetworkConnectionId", respContent.OtNetworkConnectionId),
 	)
 

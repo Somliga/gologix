@@ -827,7 +827,7 @@ func (client *Client) readList(tags []tagDesc) ([]any, error) {
 		// TODO: calculate the actual message size, not just the IOI data size.
 		// TODO: We also need to calculate the response size we expect from the PLC and split
 		//       into multiple messages on that also.
-		if totalMsgSize > int(client.ConnectionSize) {
+		if totalMsgSize > int(client.activeSize()) {
 			first_part := tags[:i]
 			rest := tags[i:]
 
