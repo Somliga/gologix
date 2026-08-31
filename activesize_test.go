@@ -30,8 +30,10 @@ func TestCountIOIsThatFitUsesActiveSizeNotConfigured(t *testing.T) {
 		t.Fatalf("countIOIsThatFit (negotiated 511): %v", err)
 	}
 	if nSmall >= total {
-		t.Fatalf("negotiatedSize=511 but all %d tags fit in one pass (n=%d) — fixture doesn't "+
-			"exercise the small path, add more tags", total, nSmall)
+		t.Fatalf("negotiatedSize=511 but all %d tags fit in one pass (n=%d): the packers are "+
+			"sizing against the configured ConnectionSize instead of activeSize(). "+
+			"(If activeSize() is correct, the fixture is too small to exercise the small path.)",
+			total, nSmall)
 	}
 
 	// Never negotiated (fresh client): must fall back to the configured ConnectionSize, 4000 —

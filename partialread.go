@@ -162,3 +162,58 @@ func (client *Client) countIOIsThatFit(tags []tagDesc) (int, error) {
 	return n, nil
 
 }
+
+// CountThatFit reports how many of the leading tags fit in ONE Multiple Service Packet at
+// the connection size currently in force. It is the arithmetic ReadList uses to decide
+// where to split, exposed so a caller can do the splitting itself and keep one call equal
+// to one request on the wire.
+func (client *Client) CountThatFit(tagnames []string, types []any, elements []int) (int, error) {
+	tags, err := buildTagDescs(tagnames, types, elements)
+	if err != nil {
+		return 0, err
+	}
+	if len(tags) == 0 {
+		return 0, nil
+	}
+	return client.countIOIsThatFit(tags)
+}
+
+// ReadListOnce reads every named tag in exactly one message, or returns an error. Unlike
+// ReadList it never splits: a caller pacing requests must not have extra ones issued
+// inside a single call.
+func (client *Client) ReadListOnce(tagnames []string, types []any, elements []int) ([]any, error) {
+	if err := client.checkConnection(); err != nil {
+		return nil, fmt.Errorf("could not start list read: %w", err)
+	}
+	tags, err := buildTagDescs(tagnames, types, elements)
+	if err != nil {
+		return nil, err
+	}
+	fit, err := client.countIOIsThatFit(tags)
+	if err != nil {
+		return nil, err
+	}
+	if fit < len(tags) {
+		return nil, fmt.Errorf("read of %d tags does not fit one message (%d fit); "+
+			"split it yourself so each call is one request", len(tags), fit)
+	}
+	return client.readList(tags)
+}
+
+func buildTagDescs(tagnames []string, types []any, elements []int) ([]tagDesc, error) {
+	if len(tagnames) != len(types) || len(tagnames) != len(elements) {
+		return nil, fmt.Errorf("mismatched lengths: %d names, %d types, %d elements",
+			len(tagnames), len(types), len(elements))
+	}
+	tags := make([]tagDesc, len(tagnames))
+	for i := range tagnames {
+		typ, _ := GoVarToCIPType(types[i])
+		tags[i] = tagDesc{
+			TagName:  tagnames[i],
+			TagType:  typ,
+			Elements: elements[i],
+			Struct:   types[i],
+		}
+	}
+	return tags, nil
+}
