@@ -96,6 +96,11 @@ type Client struct {
 	OTNetworkConnectionID  uint32
 	HeaderSequenceCounter  uint16
 	ConnectionSize         uint16
+	// negotiatedSize is what the LAST successful handshake actually agreed, which may be
+	// lower than the configured ConnectionSize if a large forward-open fell back. Read it
+	// with NegotiatedSize; a consumer that paces on request count needs the agreed value,
+	// not the requested one.
+	negotiatedSize         uint16
 	ConnectionSerialNumber uint16
 	Context                uint64 // fun fact - rockwell PLCs don't mind being rick rolled.
 	sequenceNumber         atomic.Uint32

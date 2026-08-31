@@ -149,28 +149,33 @@ func (client *Client) Connect() error {
 		return err
 	}
 
-	if client.ConnectionSize > connSizeStandardMax {
-		item, err := client.newForwardOpenLarge()
+	// size is what THIS attempt negotiates with. client.ConnectionSize stays as the caller
+	// configured it, because a transient large-forward-open failure must not silently
+	// reconfigure the client for the life of the process — a consumer that derives its
+	// request count from this number would halve its pacing gap and never be told.
+	size := client.ConnectionSize
+	if size > connSizeStandardMax {
+		item, err := client.newForwardOpenLarge(size)
 		if err != nil {
 			return err
 		}
 		err = client.forwardOpen(item)
 		if err != nil {
-			client.Logger.Warn("Large forward open failed. Not all devices support this.  Falling back to standard forward open", slog.Any("err", err))
-			client.ConnectionSize = connSizeStandardDefault
+			client.Logger.Warn("Large forward open failed. Falling back to standard forward open", slog.Any("err", err))
+			size = connSizeStandardDefault
 		}
 	}
-	if client.ConnectionSize <= connSizeStandardMax {
-		item, err := client.newForwardOpenStandard()
+	if size <= connSizeStandardMax {
+		item, err := client.newForwardOpenStandard(size)
 		if err != nil {
 			return err
 		}
-		err = client.forwardOpen(item)
-		if err != nil {
+		if err := client.forwardOpen(item); err != nil {
 			client.Logger.Error("unable to open connection", slog.Any("err", err))
 			return err
 		}
 	}
+	client.negotiatedSize = size
 
 	success = true
 	if client.KeepAliveAutoStart {
@@ -184,6 +189,10 @@ func (client *Client) Connected() bool {
 	defer client.mutex.Unlock()
 	return client.connStatus == connectionStatusConnected
 }
+
+// NegotiatedSize is the connection size the last successful handshake agreed. Zero before
+// the first successful Connect.
+func (client *Client) NegotiatedSize() uint16 { return client.negotiatedSize }
 
 func (client *Client) registerSession() error {
 	reg_msg := msgCIPRegister{
@@ -335,16 +344,19 @@ type cipForwardOpen[T uint16 | uint32] struct {
 	ConnPathSize           byte
 }
 
-func (client *Client) newForwardOpenLarge() (CIPItem, error) {
+// newForwardOpenLarge builds the large-forward-open request for size. size is the value
+// THIS attempt negotiates with — it must not read or write client.ConnectionSize, or a
+// fallback in the caller (Connect) would be silently undone here.
+func (client *Client) newForwardOpenLarge(size uint16) (CIPItem, error) {
 	item := CIPItem{Header: cipItemHeader{ID: cipItem_UnconnectedData}}
-	if client.ConnectionSize == 0 {
-		client.ConnectionSize = connSizeLargeDefault
+	if size == 0 {
+		size = connSizeLargeDefault
 	}
-	if client.ConnectionSize <= connSizeStandardMax {
+	if size <= connSizeStandardMax {
 		client.Logger.Info(
 			"The size could be a standard connection",
 			slog.Any("standardMaxSize", connSizeStandardMax),
-			slog.Any("size", client.ConnectionSize),
+			slog.Any("size", size),
 		)
 	}
 
@@ -369,7 +381,7 @@ func (client *Client) newForwardOpenLarge() (CIPItem, error) {
 			connectionType<<29 |
 			priority<<26 |
 			connectionSizeType<<25 |
-			uint32(client.ConnectionSize),
+			uint32(size),
 	)
 
 	var msg cipForwardOpen[uint32]
@@ -413,17 +425,20 @@ type msgCIPRegister struct {
 	OptionFlag      uint16
 }
 
-func (client *Client) newForwardOpenStandard() (CIPItem, error) {
-	if client.ConnectionSize == 0 {
-		client.ConnectionSize = connSizeStandardDefault
+// newForwardOpenStandard builds the standard forward-open request for size. size is the
+// value THIS attempt negotiates with — it must not read or write client.ConnectionSize, or
+// a fallback in the caller (Connect) would be silently undone here.
+func (client *Client) newForwardOpenStandard(size uint16) (CIPItem, error) {
+	if size == 0 {
+		size = connSizeStandardDefault
 	}
-	if client.ConnectionSize > connSizeStandardMax {
+	if size > connSizeStandardMax {
 		client.Logger.Warn(
 			"connection size too large. resetting to max size",
-			slog.Any("oldConnectionSize", client.ConnectionSize),
+			slog.Any("oldConnectionSize", size),
 			slog.Any("newConnectionSize", connSizeStandardMax),
 		)
-		client.ConnectionSize = connSizeStandardMax
+		size = connSizeStandardMax
 	}
 	item := CIPItem{Header: cipItemHeader{ID: cipItem_UnconnectedData}}
 
@@ -448,7 +463,7 @@ func (client *Client) newForwardOpenStandard() (CIPItem, error) {
 			connectionType<<13 |
 			priority<<10 |
 			connectionSizeType<<9 |
-			client.ConnectionSize,
+			size,
 	)
 
 	var msg cipForwardOpen[uint16]
