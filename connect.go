@@ -75,6 +75,16 @@ func (client *Client) Connect() error {
 	success := false
 	defer func() {
 		if !success {
+			// Close the socket the dial opened. Every failure after net.DialTimeout —
+			// registerSession, either forwardOpen — returns with client.conn live, and
+			// send_recv_data's force-disconnect cannot help because startDisconnect
+			// refuses while connStatus is connectionStatusConnecting. Without this the
+			// socket is orphaned when the next attempt overwrites client.conn, and the
+			// controller holds its side with no ForwardClose.
+			if client.conn != nil {
+				_ = client.conn.Close()
+				client.conn = nil
+			}
 			client.mutex.Lock()
 			client.connStatus = connectionStatusDisconnected
 			client.mutex.Unlock()
