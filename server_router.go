@@ -39,12 +39,19 @@ func (router *PathRouter) Resolve(path []byte) (CIPEndpoint, error) {
 	return tp, nil
 }
 
+// TagProvider is the read half of an endpoint, split out of CIPEndpoint so a store with no write
+// path can satisfy an interface without being forced to carry a write method it does not want.
+type TagProvider interface {
+	TagRead(tag string, qty int16) (any, error)
+}
+
 // This interface specifies all the needed methods to handle incoming CIP messages.
 // currently supports Class1 IO messages and Class3 tag read/write messages.
 // if a type only handles some subset, it should return an error for those methods
 type CIPEndpoint interface {
-	// These functions are called when a cip service attempts to use the write or read services.
-	TagRead(tag string, qty int16) (any, error)
+	TagProvider
+
+	// TagWrite is called when a cip service attempts to use the write service.
 	TagWrite(tag string, value any) error
 
 	// IORead is called every time the RPI triggers for an Input (from the PLC's perspective) IO message.
