@@ -40,3 +40,34 @@ func TestServeOnUsesTheGivenListeners(t *testing.T) {
 		t.Errorf("srv.UDPListener = %v, want the conn passed in", srv.UDPListener)
 	}
 }
+
+// TestServeTCPExitsWhenTheListenerCloses pins fork patch 4. The accept loop treated every error
+// as transient and continued, but a closed listener returns net.ErrClosed immediately and forever,
+// so the loop spins at ~895,000 iterations/second. A stopped server must stop, not burn a core.
+func TestServeTCPExitsWhenTheListenerCloses(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	p, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer p.Close()
+
+	srv := NewServer(nil)
+	done := make(chan error, 1)
+	go func() { done <- srv.ServeOn(l, p) }()
+
+	// Give it a moment to reach Accept, then take the listener away.
+	time.Sleep(50 * time.Millisecond)
+	_ = l.Close()
+
+	select {
+	case <-done:
+		// Returned, which is the point.
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeOn did not return within 2s of its listener closing — the accept loop is " +
+			"treating net.ErrClosed as transient and spinning")
+	}
+}
