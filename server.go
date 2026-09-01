@@ -88,7 +88,11 @@ func (srv *Server) ServeOn(l net.Listener, p net.PacketConn) error {
 
 	// we'll start two server goroutines and then wait for either of them to error out on the error channel.
 
-	errCh := make(chan error)
+	// Buffered for two: both goroutines below can now return (af5ecef made the accept loops exit
+	// on a closed listener), and ServeOn reads exactly one value. Unbuffered, the second sender
+	// blocks on that send forever - one leaked goroutine per server lifecycle, which is what
+	// af5ecef traded the pegged core for.
+	errCh := make(chan error, 2)
 
 	go func() {
 		err := srv.serveUDP()

@@ -23,7 +23,8 @@ func TestServeOnUsesTheGivenListeners(t *testing.T) {
 	defer p.Close()
 
 	srv := NewServer(nil)
-	go func() { _ = srv.ServeOn(l, p) }()
+	done := make(chan error, 1)
+	go func() { done <- srv.ServeOn(l, p) }()
 
 	// The server must be reachable on the address WE chose, not on 44818.
 	c, err := net.DialTimeout("tcp", l.Addr().String(), time.Second)
@@ -31,6 +32,12 @@ func TestServeOnUsesTheGivenListeners(t *testing.T) {
 		t.Fatalf("dial the listener we supplied: %v", err)
 	}
 	_ = c.Close()
+
+	// Read the fields only after ServeOn has returned. ServeOn writes them from its own goroutine
+	// (server.go:86-87), so reading them while it runs is a data race that -race reports. The
+	// receive below is the happens-before edge that makes these reads legal.
+	_ = l.Close()
+	<-done
 
 	if srv.TCPListener != l {
 		t.Errorf("srv.TCPListener = %v, want the listener passed in — ServeOn must not open its own",
