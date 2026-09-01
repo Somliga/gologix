@@ -56,6 +56,7 @@ func (client *Client) ReadList(tagnames []string, types []any, elements []int) (
 	total := len(tagnames)
 	results := make([]any, 0, total)
 	msgs := 0
+	var failed []TagError
 
 	tags := make([]tagDesc, total)
 
@@ -76,15 +77,23 @@ func (client *Client) ReadList(tagnames []string, types []any, elements []int) (
 			return nil, err
 		}
 		subresults, err := client.readList(tags[n : n+n_new])
+		// A partial failure inside one sub-message is not a reason to discard the whole
+		// list: shift its indices into this caller's numbering and carry on. See
+		// PartialReadError.
+		subfailed, err := takePartial(err, n)
 		n += n_new
 		if err != nil {
 			return nil, err
 		}
+		failed = append(failed, subfailed...)
 		results = append(results, subresults...)
 
 	}
 
 	client.Logger.Debug("Multi Read", "messages", msgs, "tags", n)
+	if len(failed) > 0 {
+		return results, &PartialReadError{Failed: failed}
+	}
 	return results, nil
 }
 

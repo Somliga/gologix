@@ -832,14 +832,20 @@ func (client *Client) readList(tags []tagDesc) ([]any, error) {
 			rest := tags[i:]
 
 			results0, err := client.readList(first_part)
+			failed0, err := takePartial(err, 0)
 			if err != nil {
 				return nil, fmt.Errorf("problem reading first part of tags: %w", err)
 			}
 			results1, err := client.readList(rest)
+			failed1, err := takePartial(err, i)
 			if err != nil {
 				return nil, fmt.Errorf("problem reading second part of tags: %w", err)
 			}
-			return append(results0, results1...), nil
+			values := append(results0, results1...)
+			if failed := append(failed0, failed1...); len(failed) > 0 {
+				return values, &PartialReadError{Failed: failed}
+			}
+			return values, nil
 
 		}
 	}
@@ -901,12 +907,24 @@ func (client *Client) readList(tags []tagDesc) ([]any, error) {
 	if err != nil {
 		return nil, fmt.Errorf("problem reading reply header status. %w", err)
 	}
-	if reply_hdr.Status != uint16(CIPStatus_OK) {
+	// 0x1E (Embedded Service Error) is what a controller returns when the packet was fine but
+	// at least one embedded service was not — the per-service statuses below say which. Bailing
+	// here would throw away every value that DID come back, which for one renamed tag among
+	// eleven is ten good readings lost every cycle, indefinitely.
+	if reply_hdr.Status != uint16(CIPStatus_OK) && reply_hdr.Status != uint16(CIPStatus_EmbeddedServiceError) {
 		return nil, fmt.Errorf("service returned status %v", CIPStatus(reply_hdr.Status))
 	}
 	reply_hdr.Reply_Count, err = rItem.Uint16()
 	if err != nil {
 		return nil, fmt.Errorf("problem reading reply header item count. %w", err)
+	}
+	// Reply_Count is unchecked wire data that drives the loop below, which indexes tags[i] —
+	// a count HIGHER than the request panics with an out-of-range index, and a lower one
+	// silently returns a short, positionally-ambiguous slice. Neither is something a
+	// collector should do with a malformed reply.
+	if int(reply_hdr.Reply_Count) != len(tags) {
+		return nil, fmt.Errorf("reply carried %d services for %d requested tags",
+			reply_hdr.Reply_Count, len(tags))
 	}
 
 	offset_table := make([]uint16, reply_hdr.Reply_Count)
@@ -919,14 +937,20 @@ func (client *Client) readList(tags []tagDesc) ([]any, error) {
 		return nil, err
 	}
 	result_values := make([]interface{}, reply_hdr.Reply_Count)
+	var failed []TagError
 	for i := 0; i < int(reply_hdr.Reply_Count); i++ {
 		offset := offset_table[i] + 10 // offset doesn't start at 0 in the item
 		myBytes := bytes.NewBuffer(rb[offset:])
-		rHdr := msgMultiReadResult{}
-		err = binary.Read(myBytes, binary.LittleEndian, &rHdr)
+		// Only the first four bytes are common to every per-service reply. A FAILING service
+		// stops there — no Type, no data — so reading the whole six-byte msgMultiReadResult
+		// unconditionally is wrong on the wire, and a hard EOF when the failing service is
+		// the last one in the packet.
+		svcHdr := msgMultiServiceStatus{}
+		err = binary.Read(myBytes, binary.LittleEndian, &svcHdr)
 		if err != nil {
 			return nil, fmt.Errorf("problem reading multi result header. %w", err)
 		}
+		rHdr := msgMultiReadResult{Service: svcHdr.Service, Reserved: svcHdr.Reserved, Status: svcHdr.Status}
 
 		// bit 8 of the service indicates whether it is a response service
 		if !rHdr.Service.IsResponse() {
@@ -934,8 +958,22 @@ func (client *Client) readList(tags []tagDesc) ([]any, error) {
 		}
 		rHdr.Service = rHdr.Service.UnResponse()
 		if rHdr.Status != uint16(CIPStatus_OK) {
-			return nil, fmt.Errorf("problem reading %v. Status %v", tags[i], rHdr.Status)
+			// This service failed and the others did not. Record which, leave its slot nil,
+			// and keep parsing — see PartialReadError.
+			failed = append(failed, TagError{
+				Index:  i,
+				Tag:    tags[i].TagName,
+				Status: CIPStatus(rHdr.Status),
+			})
+			continue
 		}
+		// The type segment follows the status ONLY on a successful service.
+		typHdr := msgMultiServiceType{}
+		err = binary.Read(myBytes, binary.LittleEndian, &typHdr)
+		if err != nil {
+			return nil, fmt.Errorf("problem reading multi result type for %v. %w", tags[i], err)
+		}
+		rHdr.Type, rHdr.Reserved2 = typHdr.Type, typHdr.Reserved2
 		if tags[i].Elements == 1 {
 			if tags[i].TagType == CIPTypeBOOL && rHdr.Type != CIPTypeBOOL && iois[i].BitAccess {
 				// we have requested a bool from some other type.  Maybe a bit access?
@@ -1023,8 +1061,84 @@ func (client *Client) readList(tags []tagDesc) ([]any, error) {
 		}
 	}
 
+	if len(failed) > 0 {
+		return result_values, &PartialReadError{Failed: failed}
+	}
 	return result_values, nil
 
+}
+
+// msgMultiServiceStatus is the part of a per-service reply inside a Multiple Service Packet
+// that is present whether the service succeeded or failed. Status is the general status byte
+// plus the additional-status word count, read as one little-endian uint16 the way
+// msgMultiReadResult has always read it.
+type msgMultiServiceStatus struct {
+	Service  CIPService
+	Reserved byte
+	Status   uint16
+}
+
+// msgMultiServiceType is the type segment that follows msgMultiServiceStatus on a SUCCESSFUL
+// per-service reply only.
+type msgMultiServiceType struct {
+	Type      CIPType
+	Reserved2 byte
+}
+
+// TagError is one embedded read service that came back with an error status instead of a
+// value. Index is its position in the tag list the caller passed.
+type TagError struct {
+	Index  int
+	Tag    string
+	Status CIPStatus
+}
+
+func (e TagError) Error() string {
+	return fmt.Sprintf("tag %q (index %d): %v", e.Tag, e.Index, e.Status)
+}
+
+// PartialReadError reports that a Multiple Service Packet reply was well-formed and the
+// connection is healthy, but some of the embedded read services failed. One unknown or renamed
+// tag is the ordinary cause: a controller answers that service with general status 0x05 (Path
+// Destination Unknown) and the packet as a whole with 0x1E (Embedded Service Error).
+//
+// It is returned ALONGSIDE the values that did arrive. The result slice keeps its full length
+// and every tag's position in it, and each index named in Failed is nil there. A caller that
+// treats any non-nil error as total failure therefore behaves exactly as before; a caller that
+// wants the ten good readings out of eleven picks this type out with errors.As.
+//
+// The nil is deliberate: a read that failed must not be indistinguishable from a read that
+// returned zero. Nothing here fills it in, and nothing should.
+type PartialReadError struct {
+	Failed []TagError
+}
+
+func (e *PartialReadError) Error() string {
+	msg := fmt.Sprintf("%d read(s) in the batch failed:", len(e.Failed))
+	for _, f := range e.Failed {
+		msg += " " + f.Error() + ";"
+	}
+	return msg
+}
+
+// takePartial separates a partial-read failure from a total one. When err reports per-service
+// failures, their indices are shifted by base — so a split read numbers them against the
+// caller's own tag list — and the returned error is nil, because the values returned alongside
+// it are valid. Any other error, including nil, passes through unchanged.
+func takePartial(err error, base int) ([]TagError, error) {
+	if err == nil {
+		return nil, nil
+	}
+	var p *PartialReadError
+	if !errors.As(err, &p) {
+		return nil, err
+	}
+	out := make([]TagError, 0, len(p.Failed))
+	for _, f := range p.Failed {
+		f.Index += base
+		out = append(out, f)
+	}
+	return out, nil
 }
 
 func parseArrayStruct[T GoLogixTypes](dat []byte, elements uint16) ([]T, error) {

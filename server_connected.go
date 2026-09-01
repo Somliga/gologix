@@ -113,6 +113,9 @@ func (h *serverTCPHandler) connectedMulti(items []CIPItem) error {
 	}
 	offsets := make([]int16, qty)
 	results := make([][]byte, qty)
+	// embeddedErr records that at least one embedded service failed, which turns the OVERALL
+	// reply status to 0x1E while every service that worked still carries its value.
+	embeddedErr := false
 	for i := range offsets {
 		offsets[i], err = item.Int16()
 		if err != nil {
@@ -148,7 +151,17 @@ func (h *serverTCPHandler) connectedMulti(items []CIPItem) error {
 
 			result, err := p.TagRead(tagname, int16(qty))
 			if err != nil {
-				return fmt.Errorf("problem getting data for %s from provider. %w", tagname, err)
+				// ONE unreadable tag must not cost the whole packet. Returning an error
+				// here unwinds to no reply at all and a dropped TCP connection
+				// (server.go:326-329 plus :227-229's deferred Close), so the client loses
+				// every value in the batch AND its session, every cycle, forever. A real
+				// CompactLogix answers this service with its own error status inside the
+				// reply, keeps the connection up, and returns the other services' values.
+				h.server.Logger.Debug("multi-service read failed",
+					"tag", tagname, "error", err)
+				results[i] = cipMultiServiceErrorReply(svc, CIPStatus_PathDestinationUnknown)
+				embeddedErr = true
+				continue
 			}
 
 			// build this portion of the response msg
@@ -250,7 +263,24 @@ func (h *serverTCPHandler) connectedMulti(items []CIPItem) error {
 		response[2+i] = results[i]
 	}
 
-	return h.sendConnectedReply(CIPService_MultipleService, seq, connection.TO, response...)
+	// 0x1E, Embedded Service Error: the Multiple Service Packet itself was well-formed and the
+	// connection is fine, but at least one embedded service failed. The per-service statuses
+	// written above say which. Status stays OK when every read succeeded, so a fully
+	// successful packet is byte-identical to what this server has always sent.
+	status := CIPStatus_OK
+	if embeddedErr {
+		status = CIPStatus_EmbeddedServiceError
+	}
+	return h.sendConnectedReplyStatus(CIPService_MultipleService, seq, connection.TO, status, response...)
+}
+
+// cipMultiServiceErrorReply is one FAILING service's reply inside a Multiple Service Packet:
+// the service code with the response bit set, the reserved byte, the general status, and a zero
+// count of additional status words. Four bytes, and that is the whole reply — there is no Type
+// and no data, which is why a client must not parse the six-byte success layout unconditionally
+// (see readList's per-service parsing).
+func cipMultiServiceErrorReply(svc CIPService, status CIPStatus) []byte {
+	return []byte{byte(svc.AsResponse()), 0x00, byte(status), 0x00}
 }
 
 // connectedRead handles both CIPService_Read (0x4C) and CIPService_FragRead
@@ -475,11 +505,19 @@ func parseWriteValues(item *CIPItem) ([]any, error) {
 }
 
 func (h *serverTCPHandler) sendConnectedReply(s CIPService, seq uint16, connID uint32, payload ...any) error {
+	return h.sendConnectedReplyStatus(s, seq, connID, CIPStatus_OK, payload...)
+}
+
+// sendConnectedReplyStatus is sendConnectedReply with a non-OK general status on the reply
+// header while still carrying a payload. The Multiple Service Packet needs exactly that
+// combination: status 0x1E with every successful service's data still in the reply.
+func (h *serverTCPHandler) sendConnectedReplyStatus(s CIPService, seq uint16, connID uint32, status CIPStatus, payload ...any) error {
 	items := make([]CIPItem, 2)
 	items[0] = newItem(cipItem_ConnectionAddress, connID)
 	items[1] = newItem(cipItem_ConnectedData, seq)
 	resp := msgUnconnWriteResultHeader{
 		Service: s.AsResponse(),
+		Status:  status,
 	}
 	err := items[1].Serialize(resp)
 	if err != nil {
