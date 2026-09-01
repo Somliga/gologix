@@ -4,7 +4,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for monitoring a heartbeat tag named "TestHeartBeat" in the controller.

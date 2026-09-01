@@ -10,7 +10,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 var Connections = make(map[string]*gologix.Client)

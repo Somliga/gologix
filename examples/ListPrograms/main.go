@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for listing programs and tags from a PLC.

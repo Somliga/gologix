@@ -6,7 +6,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for testing PLC connection reliability by reading

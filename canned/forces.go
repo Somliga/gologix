@@ -3,7 +3,7 @@ package canned
 import (
 	"fmt"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 type ForceStatus uint16

@@ -5,7 +5,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program showing how to use ListIdentity and ListServices

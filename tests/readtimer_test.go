@@ -6,8 +6,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danomagnum/gologix"
-	"github.com/danomagnum/gologix/lgxtypes"
+	"github.com/Somliga/gologix"
+	"github.com/Somliga/gologix/lgxtypes"
 )
 
 func TestTimerRead(t *testing.T) {

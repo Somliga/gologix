@@ -6,7 +6,7 @@ import (
 	"os"
 	"testing"
 
-	"github.com/danomagnum/gologix/l5x"
+	"github.com/Somliga/gologix/l5x"
 )
 
 func TestDecodeL5X(t *testing.T) {

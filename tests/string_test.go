@@ -3,7 +3,7 @@ package gologix_tests
 import (
 	"testing"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 type LilString struct {

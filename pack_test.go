@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"testing"
 
-	"github.com/danomagnum/gologix/lgxtypes"
+	"github.com/Somliga/gologix/lgxtypes"
 )
 
 func TestPack(t *testing.T) {

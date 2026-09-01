@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 func TestReadArrNew(t *testing.T) {

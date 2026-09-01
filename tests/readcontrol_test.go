@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/danomagnum/gologix"
-	"github.com/danomagnum/gologix/lgxtypes"
+	"github.com/Somliga/gologix"
+	"github.com/Somliga/gologix/lgxtypes"
 )
 
 func TestControl(t *testing.T) {

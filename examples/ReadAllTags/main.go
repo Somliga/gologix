@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for listing all tags in a controller and reading their values.

@@ -8,7 +8,7 @@ import (
 	"net/http"
 	"os"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 func main() {

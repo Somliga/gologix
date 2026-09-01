@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for reading elements from a DINT array named "TestDintArr" in the controller.

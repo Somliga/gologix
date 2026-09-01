@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // This test uses the GenericCIPMessage function to read attributes from a controller.  In this case it is reading

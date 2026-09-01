@@ -1,4 +1,4 @@
-module github.com/danomagnum/gologix
+module github.com/Somliga/gologix
 
 go 1.21
 

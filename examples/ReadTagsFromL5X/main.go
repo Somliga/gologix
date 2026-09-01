@@ -6,7 +6,7 @@ import (
 	"log"
 	"os"
 
-	"github.com/danomagnum/gologix/l5x"
+	"github.com/Somliga/gologix/l5x"
 )
 
 // This is an example of how to read tags from an L5X file.

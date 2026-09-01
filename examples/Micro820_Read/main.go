@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"log"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for reading various tag types from a Micro820 controller.

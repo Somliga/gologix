@@ -4,7 +4,7 @@ import (
 	"bytes"
 	"log"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for readng an INT tag named "TestInt" in the controller.

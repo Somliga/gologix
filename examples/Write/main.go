@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for writing an INT value to a tag named "WriteUDTs[5].Field1" in the controller.

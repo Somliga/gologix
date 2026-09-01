@@ -3,7 +3,7 @@ package main
 import (
 	"log"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 // Demo program for reading attributes from a logix PLC

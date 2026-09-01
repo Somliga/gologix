@@ -3,8 +3,8 @@ package main
 import (
 	"log"
 
-	"github.com/danomagnum/gologix"
-	"github.com/danomagnum/gologix/canned"
+	"github.com/Somliga/gologix"
+	"github.com/Somliga/gologix/canned"
 )
 
 func main() {

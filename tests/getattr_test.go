@@ -4,7 +4,7 @@ import (
 	"log"
 	"testing"
 
-	"github.com/danomagnum/gologix"
+	"github.com/Somliga/gologix"
 )
 
 func TestGetAttrSingle(t *testing.T) {
