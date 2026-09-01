@@ -71,3 +71,38 @@ func TestServeTCPExitsWhenTheListenerCloses(t *testing.T) {
 			"treating net.ErrClosed as transient and spinning")
 	}
 }
+
+// TestServeUDPExitsWhenTheConnCloses is the UDP twin, and it exists because the UDP side had the
+// same spin by a DIFFERENT mechanism: serveUDP checked `n == 0` before `err`, and a closed
+// PacketConn's ReadFrom returns net.ErrClosed WITH n == 0, so it took the "read 0 bytes" branch and
+// never reached the error check. Symmetry of the fix is not evidence of the fix.
+//
+// ServeOn returns when either goroutine errors, so closing only the PacketConn is enough to prove
+// the UDP loop exits on its own — the TCP listener is left open deliberately.
+func TestServeUDPExitsWhenTheConnCloses(t *testing.T) {
+	l, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer l.Close()
+	p, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	srv := NewServer(nil)
+	done := make(chan error, 1)
+	go func() { done <- srv.ServeOn(l, p) }()
+
+	// Give it a moment to reach ReadFrom, then take the conn away.
+	time.Sleep(50 * time.Millisecond)
+	_ = p.Close()
+
+	select {
+	case <-done:
+		// Returned, which is the point.
+	case <-time.After(2 * time.Second):
+		t.Fatal("ServeOn did not return within 2s of its PacketConn closing — serveUDP is " +
+			"treating net.ErrClosed as a short read and spinning")
+	}
+}
