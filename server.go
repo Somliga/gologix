@@ -61,20 +61,29 @@ func NewServer(r *PathRouter) *Server {
 // these are 44818 and 2222 respectively
 // as far as I can tell there is never an option to change this on any devices so it is hard coded here.
 func (srv *Server) Serve() error {
-	srv.ConnMgr.Init(srv.Logger)
-
-	var err error
-	srv.TCPListener, err = net.Listen("tcp", "0.0.0.0:44818")
-	srv.Logger.Info("Listening on TCP port 44818")
+	l, err := net.Listen("tcp", "0.0.0.0:44818")
 	if err != nil {
 		return fmt.Errorf("couldn't open tcp listener. %w", err)
 	}
+	srv.Logger.Info("Listening on TCP port 44818")
 
-	srv.UDPListener, err = net.ListenPacket("udp", "0.0.0.0:2222")
-	srv.Logger.Info("Listening on UDP port 2222")
+	p, err := net.ListenPacket("udp", "0.0.0.0:2222")
 	if err != nil {
-		return fmt.Errorf("couldn't open udp listener. %v", err)
+		_ = l.Close()
+		return fmt.Errorf("couldn't open udp listener. %w", err)
 	}
+	srv.Logger.Info("Listening on UDP port 2222")
+
+	return srv.ServeOn(l, p)
+}
+
+// ServeOn serves on listeners the caller owns, instead of the hard-coded 0.0.0.0:44818 / :2222 that
+// Serve opens. This is what makes a test-scoped server possible: pass 127.0.0.1:0 and the OS picks a
+// free port, so servers do not collide and none is reachable from anywhere but this host.
+func (srv *Server) ServeOn(l net.Listener, p net.PacketConn) error {
+	srv.ConnMgr.Init(srv.Logger)
+	srv.TCPListener = l
+	srv.UDPListener = p
 
 	// we'll start two server goroutines and then wait for either of them to error out on the error channel.
 
@@ -96,7 +105,7 @@ func (srv *Server) Serve() error {
 
 	// we will wait forever for one of the serve goroutines to let us know they crashed.
 	// then we'll close them both and check for errors, combining them all together and returning it.
-	err = <-errCh
+	err := <-errCh
 	final_err := newMultiError(err)
 
 	err = srv.TCPListener.Close()
