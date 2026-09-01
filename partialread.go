@@ -112,6 +112,14 @@ func (client *Client) countIOIsThatFit(tags []tagDesc) (int, error) {
 	// how many ioi's fit in the message
 	n := 1
 
+	// n starts at 1 because it doubles as the jump-table reservation for the IOI under test, so it
+	// cannot distinguish "one tag packed" from "none packed" — and "none" is the case that matters.
+	// ReadListOnce's `fit < len(tags)` guard is blind to it at len(tags)==1, and readList's split
+	// branch then computes tags[:0] and tags[0:], recursing on its own argument for as long as the
+	// device tolerates an empty Multiple Service Packet. That is an unpaced burst underneath the
+	// layer that does the pacing, so count real packs separately and refuse instead.
+	packed := 0
+
 	response_size := 0
 
 	for i, tag := range tags {
@@ -155,6 +163,12 @@ func (client *Client) countIOIsThatFit(tags []tagDesc) (int, error) {
 		}
 
 		n = i + 1
+		packed = n
+	}
+
+	if packed == 0 {
+		return 0, fmt.Errorf("tag %q does not fit a %d-byte message on its own: no split can make "+
+			"this read fit", tags[0].TagName, client.activeSize())
 	}
 
 	client.Logger.Debug("Packed Efficiency", "tags", n, "bytes", client.activeSize())

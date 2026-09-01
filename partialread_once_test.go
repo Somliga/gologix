@@ -58,20 +58,52 @@ func TestCountThatFitSplitsOnConnectionSize(t *testing.T) {
 	}
 }
 
-// TestCountThatFitReportsOneWhenNothingFits documents an upstream quirk rather than
-// endorsing it. countIOIsThatFit starts n at 1 and raises it only after an IOI is packed, so
-// when even the first tag overflows it still answers 1. ReadList is unharmed — it makes
-// progress either way — but a caller pacing on this number would plan one request for a read
-// that cannot be sent. Pinned so a later fork rebase cannot change it silently.
-func TestCountThatFitReportsOneWhenNothingFits(t *testing.T) {
+// TestCountThatFitRefusesWhenNothingFits covers the fix for an upstream quirk that was worse
+// than it looked. countIOIsThatFit starts n at 1 — n doubles as the jump-table reservation for
+// the IOI under test — and raised it only after an IOI was packed, so when even the first tag
+// overflowed it still answered 1.
+//
+// At len(tags) >= 2 that was merely a bad number: ReadListOnce's `fit < len(tags)` guard still
+// refused. At len(tags) == 1 the guard evaluates false, ReadListOnce proceeds, and readList's
+// split branch computes tags[:0] and tags[0:] — the second being the SAME slice — so readList
+// recurses on its own argument for as long as the device tolerates the empty Multiple Service
+// Packet each level sends first. Unbounded requests as fast as the socket allows, from inside a
+// single call, underneath whatever layer the caller does its pacing in.
+//
+// The floor also made a consumer's guard dead code: surtr's poll.go checks `fit <= 0`, which a
+// floor of 1 can never satisfy. Refusing here is what makes that guard live.
+//
+// Both list lengths are asserted because they fail for different reasons, and only the second
+// could burst a device.
+func TestCountThatFitRefusesWhenNothingFits(t *testing.T) {
+	for _, n := range []int{3, 1} {
+		tagnames, types, elements := listOf(n)
+
+		got, err := quietClient(1).CountThatFit(tagnames, types, elements)
+		if err == nil {
+			t.Errorf("CountThatFit(%d tags at ConnectionSize 1) = %d, nil; want a refusal — a tag "+
+				"that does not fit alone cannot be made to fit by splitting, and answering 1 sends "+
+				"readList into unbounded self-recursion at len(tags)==1", n, got)
+			continue
+		}
+		if !strings.Contains(err.Error(), "does not fit") {
+			t.Errorf("CountThatFit(%d tags) error = %q; want it to name the cause", n, err)
+		}
+	}
+}
+
+// TestCountThatFitStillCountsWhenSomethingFits is the other half of the above, and exists because
+// a countIOIsThatFit that returned an error unconditionally would pass that test alone.
+func TestCountThatFitStillCountsWhenSomethingFits(t *testing.T) {
 	tagnames, types, elements := listOf(3)
 
-	n, err := quietClient(1).CountThatFit(tagnames, types, elements)
+	n, err := quietClient(4000).CountThatFit(tagnames, types, elements)
 	if err != nil {
-		t.Fatalf("CountThatFit at 1: %v", err)
+		t.Fatalf("CountThatFit at 4000: %v", err)
 	}
-	if n != 1 {
-		t.Errorf("upstream quirk changed: expected the floor of 1, got %d", n)
+	if n != 3 {
+		t.Errorf("CountThatFit at 4000 = %d, want all 3 — the nothing-fits refusal must not fire "+
+			"when the tags do fit", n)
 	}
 }
 
