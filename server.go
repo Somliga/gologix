@@ -582,7 +582,25 @@ func (h *serverTCPHandler) forwardClose(i CIPItem) error {
 	if err != nil {
 		return fmt.Errorf("problem parsing forward close path %w", err)
 	}
-	return nil
+
+	// ForwardClose is request/response (CIP), and the client's Disconnect blocks on a reply
+	// until SocketTimeout — reply the same way forwardOpen does, over unconnected data on the
+	// same session, so a teardown doesn't cost the client its whole timeout.
+	items := make([]CIPItem, 2)
+	items[0] = CIPItem{Header: cipItemHeader{ID: cipItem_Null}}
+	items[1] = newItem(cipItem_UnconnectedData, nil)
+	respHdr := msgCIPMessageRouterResponse{
+		Service: fwd_close.Service.AsResponse(),
+		Status:  CIPStatus_OK,
+	}
+	if err := items[1].Serialize(respHdr); err != nil {
+		return fmt.Errorf("problem serializing forward close response %w", err)
+	}
+	itemData, err := serializeItems(items)
+	if err != nil {
+		return fmt.Errorf("could not serialize items: %w", err)
+	}
+	return h.send(cipCommandSendRRData, itemData)
 }
 
 // in this message T is for target and O is for originator so
